@@ -67,7 +67,7 @@ team_t team = {
 
 //Our macros
 #define GET_SIZE_SIZEP(p) (*(uint *)p)
-#define GET_NEXT(p) ((uint *)(p + 4))
+#define GET_NEXT(p) ((int *)(p + 4))
 
 void* head;
 void* next;
@@ -181,14 +181,14 @@ void *PlaceInfo(void *prev, void *current, size_t neededSize)
         PUT(prev + 4, (uint)next);
         
         PUT(next, currentSize - neededSize - 4);
-        PUT(next + 4, (uint)GET_NEXT(current));
+        PUT(next + 4, (uint)(*GET_NEXT(current)));
 
-        printf("placing at address: %p with size: %d\n and splitting", current, neededSize);
+        printf("placing at address: %p with size: %d and splitting\n", current, neededSize);
         return current + 4;
     }
     else
     {
-        PUT(prev + 4, (uint)GET_NEXT(current));
+        PUT(prev + 4, (uint)(*GET_NEXT(current)));
 
         printf("placing at address: %p with size: %d\n", current, neededSize);
         return current + 4;
@@ -212,6 +212,8 @@ int mm_init(void)
     printf("working\n");
     printf("size based on head: %d\n", (*(uint*)head));
 
+    printf("\nValue of head: %p, value of next: %d\n", head, *GET_NEXT(head));
+
     // if((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1)
     //     return -1;
 
@@ -234,7 +236,16 @@ int mm_init(void)
  */
 void *mm_malloc(size_t size)
 {
-    printf("Beginning malloc: \n");
+    void *test = head;
+    printf("\nhead -> %p -> ", head);
+    while((int)*GET_NEXT(test) != -1) 
+    { 
+        printf("%p -> ", *GET_NEXT(test));
+        test = *GET_NEXT(test); 
+    }
+    printf("%d\n", *GET_NEXT(test));
+
+    printf("\nBeginning malloc: \n");
     size_t usableSize = ALIGN(size);
 
     void *p = head; //find_fit(usableSize);
@@ -248,7 +259,7 @@ void *mm_malloc(size_t size)
             printf("splitting head\n");
             head = head + 4 + usableSize;
             PUT(head, head_size - usableSize - 4);
-            PUT(head + 4, (uint)GET_NEXT(p));
+            PUT(head + 4, (uint)(*GET_NEXT(p)));
 
             printf("success in malloc\n");
             return p + 4;
@@ -271,6 +282,8 @@ void *mm_malloc(size_t size)
                 void *current;
                 if((current = mem_sbrk(extendSize) + 4) == NULL)
                     return NULL;
+
+                PUT(current + 4, -1);
 
                 printf("FInishing with PlaceInfo\n");
                 return PlaceInfo(head, current, usableSize);
@@ -303,6 +316,9 @@ void *mm_malloc(size_t size)
         void *current;
         if((current = mem_sbrk(extendSize) + 4) == NULL)
             return NULL;
+        
+        PUT(current + 4, -1);
+        printf("value of next for current: %d\n", *GET_NEXT(current));
 
         printf("Finishing with PlaceInfo\n");
         return PlaceInfo(p, current, usableSize);
@@ -338,11 +354,17 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
-    size_t size = GET_SIZE(HDRP(ptr));
+    printf("\nIn free\n");
+    size_t size = GET_SIZE_SIZEP(ptr - 4);
+    PUT(ptr, GET_NEXT(head));
+    head = ptr - 4;
 
-    PUT(HDRP(ptr), PACK(size, 0));
-    PUT(FTRP(ptr), PACK(size, 0));
-    coalesce(ptr);
+    printf("freed successfully\n\n");
+    // size_t size = GET_SIZE(HDRP(ptr));
+
+    // PUT(HDRP(ptr), PACK(size, 0));
+    // PUT(FTRP(ptr), PACK(size, 0));
+    // coalesce(ptr);
 }
 
 /*
