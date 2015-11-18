@@ -67,7 +67,7 @@ team_t team = {
 
 //Our macros
 #define GET_SIZE_SIZEP(p) (*(uint *)p)
-#define GET_NEXT(p) ((int *)(p + 4))
+#define GET_NEXT(p) (*(int *)(p + 4))
 
 void* head;
 void* next;
@@ -87,7 +87,7 @@ static void *find_fit(size_t asize)
 
     while(1)
     {
-        if(*GET_NEXT(p) == -1) { break; }
+        if(GET_NEXT(p) == -1) { break; }
         if(GET_SIZE_SIZEP(GET_NEXT(p)) >= asize) { return p; } //case: pointer before one we need
 
         p = GET_NEXT(p);
@@ -181,14 +181,14 @@ void *PlaceInfo(void *prev, void *current, size_t neededSize)
         PUT(prev + 4, (uint)next);
         
         PUT(next, currentSize - neededSize - 4);
-        PUT(next + 4, (uint)(*GET_NEXT(current)));
+        PUT(next + 4, (uint)(GET_NEXT(current)));
 
         printf("placing at address: %p with size: %d and splitting\n", current, neededSize);
         return current + 4;
     }
     else
     {
-        PUT(prev + 4, (uint)(*GET_NEXT(current)));
+        PUT(prev + 4, (uint)(GET_NEXT(current)));
 
         printf("placing at address: %p with size: %d\n", current, neededSize);
         return current + 4;
@@ -212,7 +212,7 @@ int mm_init(void)
     printf("working\n");
     printf("size based on head: %d\n", (*(uint*)head));
 
-    printf("\nValue of head: %p, value of next: %d\n", head, *GET_NEXT(head));
+    printf("\nValue of head: %p, value of next: %d\n", head, GET_NEXT(head));
 
     // if((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1)
     //     return -1;
@@ -237,16 +237,16 @@ int mm_init(void)
 void *mm_malloc(size_t size)
 {
     void *test = head;
-    printf("\nhead -> %p -> ", head);
-    while((int)*GET_NEXT(test) != -1) 
+    printf("\nhead -> %p(%d) -> ", head, GET_SIZE_SIZEP(head));
+    while((int)GET_NEXT(test) != -1) 
     { 
-        printf("%p -> ", *GET_NEXT(test));
-        test = *GET_NEXT(test); 
+        printf("%p(%d) -> ", GET_NEXT(test), GET_SIZE_SIZEP(test));
+        test = GET_NEXT(test); 
     }
-    printf("%d\n", *GET_NEXT(test));
+    printf("%d\n", GET_NEXT(test));
 
-    printf("\nBeginning malloc: \n");
     size_t usableSize = ALIGN(size);
+    printf("\nBeginning malloc with requested size: %d\n", usableSize);
 
     void *p = head; //find_fit(usableSize);
 
@@ -259,7 +259,7 @@ void *mm_malloc(size_t size)
             printf("splitting head\n");
             head = head + 4 + usableSize;
             PUT(head, head_size - usableSize - 4);
-            PUT(head + 4, (uint)(*GET_NEXT(p)));
+            PUT(head + 4, (uint)(GET_NEXT(p)));
 
             printf("success in malloc\n");
             return p + 4;
@@ -267,7 +267,7 @@ void *mm_malloc(size_t size)
         else
         {
             printf("Not splitting head");
-            if(*GET_NEXT(head) != -1)
+            if(GET_NEXT(head) != -1)
             {
                 head = GET_NEXT(head);
                 printf("success in malloc\n");
@@ -283,6 +283,7 @@ void *mm_malloc(size_t size)
                 if((current = mem_sbrk(extendSize) + 4) == NULL)
                     return NULL;
 
+                PUT(current, extendSize - 4);
                 PUT(current + 4, -1);
 
                 printf("FInishing with PlaceInfo\n");
@@ -293,7 +294,7 @@ void *mm_malloc(size_t size)
     else
     {
         printf("Head doesn't fit, going to next\n");
-        while(*GET_NEXT(p) != -1)
+        while(GET_NEXT(p) != -1)
         {
             uint next_size = GET_SIZE_SIZEP(GET_NEXT(p));
             if(next_size >= usableSize)
@@ -317,8 +318,9 @@ void *mm_malloc(size_t size)
         if((current = mem_sbrk(extendSize) + 4) == NULL)
             return NULL;
         
+        PUT(current, extendSize - 4);
         PUT(current + 4, -1);
-        printf("value of next for current: %d\n", *GET_NEXT(current));
+        printf("value of next for current: %d\n", GET_NEXT(current));
 
         printf("Finishing with PlaceInfo\n");
         return PlaceInfo(p, current, usableSize);
