@@ -126,6 +126,15 @@ void *mm_malloc(size_t size)
     void *bp = head;
     void *dest = NULL;
 
+    void* printPtr = head;
+    printf("\nhead -> ");
+    while(printPtr != NULL)
+    {
+        printf("%p(%d) -> " printPtr, GET_SIZE(printPtr));
+        printPtr = GET_NEXT(printPtr);
+    }
+    printf("\n\n");
+
     //Ignore 0 mallocs
     if(size == 0) { return NULL; }
 
@@ -323,10 +332,7 @@ static void *coalesce(void *ptr)
         PUT(HDRP(ptr + WSIZE), PACK(size, 0));
         PUT(FTRP(ptr + WSIZE), PACK(size, 0));
 
-        if(GET_NEXT(nextH) != NULL)
-        {
-            PUT(GET_PREVP(GET_NEXT(nextH)), ptr);
-        }
+        remove_node_references(nextH);
     } 
     else if(!prev_alloc && next_alloc) 
     { //Case 3
@@ -334,10 +340,7 @@ static void *coalesce(void *ptr)
         PUT(FTRP(ptr + WSIZE), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(ptr + WSIZE)), PACK(size, 0));
         
-        if(GET_NEXT(ptr) != NULL)
-        {
-            PUT(GET_NEXTP(prevH), GET_NEXT(ptr));
-        }        
+        remove_node_references(prevH);
 
         ptr = PREV_BLKP(ptr + WSIZE);
     }
@@ -346,10 +349,26 @@ static void *coalesce(void *ptr)
         size += GET_SIZE(prevH) + GET_SIZE(nextH);
         PUT(HDRP(PREV_BLKP(ptr + WSIZE)), PACK(size, 0));
         PUT(FTRP(NEXT_BLKP(ptr + WSIZE)), PACK(size, 0));
+        
+        remove_node_references(prevH);
+        remove_node_references(nextH);
+
         ptr = PREV_BLKP(ptr + WSIZE);
     }
 
     return ptr;
+}
+
+static void remove_node_references(void *ptr)
+{
+    if(GET_PREV(ptr) != NULL)
+    {
+        PUT(GET_NEXTP(GET_PREV(ptr)), GET_NEXT(ptr)); //n.prev.next = n.next;
+    }
+    if(GET_NEXT(ptr) != NULL)
+    {
+        PUT(GET_PREVP(GET_NEXT(ptr)), GET_PREV(ptr)); //n.next.prev = n.prev;
+    }
 }
 
 static void *extend_heap(size_t words)
@@ -369,10 +388,14 @@ static void *extend_heap(size_t words)
     PUT(FTRP(bp), PACK(size, 0)); //footer
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0,1)); //tail
 
-    bp = HDRP(bp); //Set as header
+    void *ptr = HDRP(bp); //Set as header
 
     //Coalesce if the previous block was free
-    return  coalesce(bp);
+    ptr = coalesce(ptr);
+
+    //Find place for ptr
+
+    return  coalesce(ptr);
 }
 
 int mm_check(void)
