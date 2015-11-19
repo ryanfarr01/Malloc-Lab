@@ -30,9 +30,9 @@ team_t team = {
     /* First member's UID */
     "u0771896",
     /* Second member's full name (leave blank if none) */
-    "",
+    "Riley Anderson",
     /* Second member's UID (leave blank if none) */
-    ""
+    "u0618652"
 };
 
 /* single word (4) or double word (8) alignment */
@@ -175,7 +175,7 @@ void *PlaceInfo(void *prev, void *current, size_t neededSize)
     printf("In PlaceInfo \n");
     size_t currentSize = GET_SIZE_SIZEP(current);
 
-    if(currentSize >= neededSize + 8)
+    if(neededSize >= currentSize + 8)
     {
         void* next = current + 4 + neededSize;
 
