@@ -40,6 +40,7 @@ team_t team = {
 
 /* rounds up to the nearest multiple of ALIGNMENT */
 #define ALIGN(size) (((size) + (ALIGNMENT-1)) & ~0x7)
+#define ALIGN2(size) (size%8 == 0 ? size : size + (8 - size%8))
 
 #define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
 
@@ -245,7 +246,7 @@ void *mm_malloc(size_t size)
     }
     printf("%d\n", GET_NEXT(test));
 
-    size_t usableSize = ALIGN(size);
+    size_t usableSize = ALIGN2(size);
     printf("\nBeginning malloc with requested size: %d\n", usableSize);
 
     void *p = head; //find_fit(usableSize);
