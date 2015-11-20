@@ -91,6 +91,9 @@ void print_list(int initial);
 void* heap_listp;
 void* head;
 
+int mallocCalls = 1;
+int freeCalls = 1;
+
 /* 
  * mm_init - initialize the malloc package.
  */
@@ -120,7 +123,7 @@ int mm_init(void)
  */
 void *mm_malloc(size_t size)
 {
-    printf("\nIn malloc with size: %d\n", size);
+    printf("\nIn malloc %d with size: %d\n", mallocCalls++, size);
 
     print_list(1);
 
@@ -183,7 +186,7 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
-    printf("\nIn free with pointer: %p\n", ptr);
+    printf("\nIn free %d with pointer: %p\n", freeCalls++, ptr);
 
     print_list(1);
 
@@ -297,18 +300,19 @@ static void place(void *ptr, size_t asize)
             head = nextBH;
         }
 
+        PUT(GET_PREVP(nextBH), (uint)GET_PREV(ptr)); //n_1.prev = n.prev;
+        PUT(GET_NEXTP(nextBH), (uint)GET_NEXT(ptr)); //n_1.next = n.next
+
         //Fix doubly linked list
         if(GET_NEXT(ptr) != NULL) 
         { 
             printf("Have a next\n");
-            PUT(GET_PREVP(nextBH), (uint)GET_PREV(ptr)); //n_1.prev = n.prev;
-            PUT(GET_NEXTP(GET_PREV(ptr)), (uint)nextBH); //n.prev.next = n_1;
+            PUT(GET_PREVP(GET_NEXT(ptr)), (uint)nextBH); //n.next.prev = n_1;
         }
         if(GET_PREV(ptr) != NULL) 
         { 
             printf("Have a prev\n");
-            PUT(GET_NEXTP(nextBH), (uint)GET_NEXT(ptr)); //n_1.next = n.next
-            PUT(GET_PREVP(GET_NEXT(ptr)), (uint)nextBH); //n.next.prev = n_1;
+            PUT(GET_NEXTP(GET_PREV(ptr)), (uint)nextBH); //n.prev.next = n_1;
         }
         printf("Ended split\n");
     }
@@ -366,8 +370,10 @@ static void *coalesce(void *ptr)
     { //Case 2
         printf("case 2\n");
         size += GET_SIZE(nextH);
-        PUT(HDRP(ptr + WSIZE), PACK(size, 0));
+        PUT(ptr, PACK(size, 0));
         PUT(FTRP(ptr + WSIZE), PACK(size, 0));
+
+        if(ptr == head) { head = GET_NEXT(ptr); }
 
         remove_node_references(nextH);
     } 
@@ -375,24 +381,31 @@ static void *coalesce(void *ptr)
     { //Case 3
         printf("case 3\n");
         size += GET_SIZE(prevH);
-        PUT(FTRP(ptr + WSIZE), PACK(size, 0));
+
         PUT(HDRP(PREV_BLKP(ptr + WSIZE)), PACK(size, 0));
+        PUT(FTRP(ptr + WSIZE), PACK(size, 0));
+        
+        if(prevH == head) { head = GET_NEXT(prevH); }
         
         remove_node_references(prevH);
 
-        ptr = PREV_BLKP(ptr + WSIZE);
+        ptr = HDRP(PREV_BLKP(ptr + WSIZE));
     }
     else 
     { //Case 4
         printf("case 4\n");
         size += GET_SIZE(prevH) + GET_SIZE(nextH);
+
         PUT(HDRP(PREV_BLKP(ptr + WSIZE)), PACK(size, 0));
         PUT(FTRP(NEXT_BLKP(ptr + WSIZE)), PACK(size, 0));
         
+        if(prevH == head) { head = GET_NEXT(prevH); }
+        else if(nextH == head) { head = GET_NEXT(nextH); }
+
         remove_node_references(prevH);
         remove_node_references(nextH);
 
-        ptr = PREV_BLKP(ptr + WSIZE);
+        ptr = HDRP(PREV_BLKP(ptr + WSIZE));
     }
 
     PUT(GET_NEXTP(ptr), (uint)NULL); //place null for next
@@ -504,10 +517,13 @@ void print_list(int initial)
     if(initial) { printf("Initial: "); }
     else {printf("final: ");}
 
+    int i = 0;
+
     void *printPtr = head;
     printf("head -> ");
     while(printPtr != NULL)
     {
+        if(i++ > 50) { printf("Infinite head\n"); exit(-1); }
         printf("%p(%d) p: %p -> ", printPtr, GET_SIZE(printPtr), GET_PREV(printPtr));
         printPtr = GET_NEXT(printPtr);
     }
