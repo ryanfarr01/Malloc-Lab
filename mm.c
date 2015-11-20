@@ -86,7 +86,7 @@ static void *extend_heap(size_t words);
 static void remove_node_references(void *ptr);
 void find_and_place(void * ptr);
 int mm_check(void);
-
+void print_list(int initial);
 
 void* heap_listp;
 void* head;
@@ -120,16 +120,9 @@ int mm_init(void)
  */
 void *mm_malloc(size_t size)
 {
-    printf("In malloc with size: %d\n", size);
+    printf("\nIn malloc with size: %d\n", size);
 
-    void* printPtr = head;
-    printf("\nheadInitial -> ");
-    while(printPtr != NULL)
-    {
-        printf("%p(%d) -> ", printPtr, GET_SIZE(printPtr));
-        printPtr = GET_NEXT(printPtr);
-    }
-    printf("\n\n");
+    print_list(1);
 
     size_t asize; //adjusted block size
     size_t extendsize; //amount to extend heap if no fit
@@ -180,14 +173,7 @@ void *mm_malloc(size_t size)
 
     place(dest, asize);
 
-    printPtr = head;
-    printf("\nheadFinal -> ");
-    while(printPtr != NULL)
-    {
-        printf("%p(%d) -> ", printPtr, GET_SIZE(printPtr));
-        printPtr = GET_NEXT(printPtr);
-    }
-    printf("\n\n");
+    print_list(0);
 
     return dest + WSIZE; //offset back from header
 }
@@ -197,16 +183,9 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
-    printf("In free with pointer: %p\n", ptr);
+    printf("\nIn free with pointer: %p\n", ptr);
 
-    void *printPtr = head;
-    printf("\nheadInitialFree -> ");
-    while(printPtr != NULL)
-    {
-        printf("%p(%d) -> ", printPtr, GET_SIZE(printPtr));
-        printPtr = GET_NEXT(printPtr);
-    }
-    printf("\n\n");
+    print_list(1);
 
     size_t size = GET_SIZE(HDRP(ptr));
 
@@ -217,14 +196,7 @@ void mm_free(void *ptr)
 
     find_and_place(newPtr);
 
-    printPtr = head;
-    printf("\nheadFinalFree -> ");
-    while(printPtr != NULL)
-    {
-        printf("%p(%d) -> ", printPtr, GET_SIZE(printPtr));
-        printPtr = GET_NEXT(printPtr);
-    }
-    printf("\n\n");
+    print_list(0);
 
     //place around closest memory
     // if(newPtr != head)
@@ -255,7 +227,7 @@ void mm_free(void *ptr)
  */
 void *mm_realloc(void *ptr, size_t size)
 {
-    printf("In realloc\n");
+    printf("\nIn realloc\n");
 
     void *oldptr = ptr;
     void *newptr;
@@ -388,10 +360,11 @@ static void *coalesce(void *ptr)
 
     if(prev_alloc && next_alloc)  
     { //Case 1
-        return ptr; 
+        printf("case 1\n");
     }
     else if(prev_alloc && !next_alloc) 
     { //Case 2
+        printf("case 2\n");
         size += GET_SIZE(nextH);
         PUT(HDRP(ptr + WSIZE), PACK(size, 0));
         PUT(FTRP(ptr + WSIZE), PACK(size, 0));
@@ -400,6 +373,7 @@ static void *coalesce(void *ptr)
     } 
     else if(!prev_alloc && next_alloc) 
     { //Case 3
+        printf("case 3\n");
         size += GET_SIZE(prevH);
         PUT(FTRP(ptr + WSIZE), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(ptr + WSIZE)), PACK(size, 0));
@@ -410,6 +384,7 @@ static void *coalesce(void *ptr)
     }
     else 
     { //Case 4
+        printf("case 4\n");
         size += GET_SIZE(prevH) + GET_SIZE(nextH);
         PUT(HDRP(PREV_BLKP(ptr + WSIZE)), PACK(size, 0));
         PUT(FTRP(NEXT_BLKP(ptr + WSIZE)), PACK(size, 0));
@@ -522,6 +497,21 @@ static void *extend_heap(size_t words)
     find_and_place(ptr);
 
     return  ptr;
+}
+
+void print_list(int initial)
+{
+    if(initial) { printf("Initial: "); }
+    else {printf("final: ");}
+
+    void *printPtr = head;
+    printf("head -> ");
+    while(printPtr != NULL)
+    {
+        printf("%p(%d) p: %p -> ", printPtr, GET_SIZE(printPtr), GET_PREV(printPtr));
+        printPtr = GET_NEXT(printPtr);
+    }
+    printf("null\n");
 }
 
 int mm_check(void)
