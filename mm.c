@@ -156,23 +156,12 @@ void *mm_malloc(size_t size)
         bp = GET_NEXT(bp);
     }
 
-    // if(GET_SIZE(bp) >= asize) { dest = bp; } //bp is currently a header
-
     if(dest == NULL)
     {
         extendsize = MAX(asize, CHUNKSIZE);
         if((dest = extend_heap(extendsize)) == NULL)
             return NULL;
     }
-
-    //Search the free list for a fit
-    // if((bp = find_fit(asize)) != NULL) {
-    //     place(bp, asize);
-    //     return bp;
-    // }
-
-    //No fit found. Get some more memory and place the block
-    
 
     place(dest, asize);
 
@@ -200,29 +189,6 @@ void mm_free(void *ptr)
     find_and_place(newPtr);
 
     print_list(0);
-
-    //place around closest memory
-    // if(newPtr != head)
-    // {
-    //     // if(GET_NEXT(head) != NULL) 
-    //     // { 
-    //     //     PUT(GET_PREVP(GET_NEXT(head)), newPtr); 
-    //     //     PUT(GET_NEXTP(newPtr), GET_NEXT(head));
-    //     // }
-    //     // else
-    //     // {
-    //     //     PUT(GET_NEXTP(newPtr), (uint)NULL);
-    //     // }
-
-    //     // head = newPtr;
-    // }
-
-    // size_t size = GET_SIZE(HDRP(ptr));
-
-    // PUT(HDRP(ptr), PACK(size, 0));
-    // PUT(FTRP(ptr), PACK(size, 0));
-
-    // coalesce(ptr);
 }
 
 /*
@@ -250,27 +216,6 @@ void *mm_realloc(void *ptr, size_t size)
     return newptr;
 }
 
-// static void *find_fit(size_t asize)
-// {
-//     //First-fit search
-//     void *bp;
-
-//     for(bp = head; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp))
-//     {
-
-//     }
-
-//     // void *bp;
-
-//     // for(bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
-//     //     if(!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
-//     //         return bp;
-//     //     }
-//     // }
-
-//     return NULL;
-// }
-
 //ptr should be pointing to a header, not block
 static void place(void *ptr, size_t asize)
 {
@@ -278,7 +223,7 @@ static void place(void *ptr, size_t asize)
 
     size_t csize = GET_SIZE(ptr);
 
-    if((csize - asize) >= BLOCK) 
+    if((csize - asize) > BLOCK) 
     {
         printf("Splitting\n");
         //split
@@ -290,15 +235,12 @@ static void place(void *ptr, size_t asize)
         void* nextB = NEXT_BLKP(ptr + WSIZE); //Returns a block pointer
         PUT(HDRP(nextB), PACK(csize-asize, 0));
         PUT(FTRP(nextB), PACK(csize-asize, 0));
-        PUT(nextB, (uint)NULL); //header
-        PUT(nextB + WSIZE, (uint)NULL); //footer
+        PUT(nextB, (uint)NULL); //next
+        PUT(nextB + WSIZE, (uint)NULL); //prev
 
         void* nextBH = HDRP(nextB);
-        if(head == ptr)
-        {
-            printf("Setting head as right side of split\n");
-            head = nextBH;
-        }
+
+        printf("Header of nextB: %p\n", nextBH);
 
         PUT(GET_PREVP(nextBH), (uint)GET_PREV(ptr)); //n_1.prev = n.prev;
         PUT(GET_NEXTP(nextBH), (uint)GET_NEXT(ptr)); //n_1.next = n.next
@@ -314,15 +256,15 @@ static void place(void *ptr, size_t asize)
             printf("Have a prev\n");
             PUT(GET_NEXTP(GET_PREV(ptr)), (uint)nextBH); //n.prev.next = n_1;
         }
+        else //no prev implies it's the head
+        {
+            printf("Setting head as right side of split\n");
+            head = nextBH;
+        }
         printf("Ended split\n");
     }
     else
     {
-        if(head == ptr)
-        {
-            head = NULL;
-        }
-
         //Change current header
         PUT(ptr, PACK(csize, 1));
         PUT(FTRP(ptr + WSIZE), PACK(csize, 1));
@@ -330,6 +272,10 @@ static void place(void *ptr, size_t asize)
         //Alter doubly linked list
         if(GET_NEXT(ptr) != NULL) { PUT(GET_PREVP(GET_NEXT(ptr)), (uint)GET_PREV(ptr)); }
         if(GET_PREV(ptr) != NULL) { PUT(GET_NEXTP(GET_PREV(ptr)), (uint)GET_NEXT(ptr)); }
+        else
+        {
+            head = GET_NEXT(ptr);
+        }
     }
 
     // size_t csize = GET_SIZE(HDRP(bp));
@@ -470,16 +416,21 @@ void find_and_place(void * ptr)
 
 static void remove_node_references(void *ptr)
 {
-    if(ptr == head) { head = NULL; }
-
     if(GET_PREV(ptr) != NULL)
     {
         PUT(GET_NEXTP(GET_PREV(ptr)), (uint)GET_NEXT(ptr)); //n.prev.next = n.next;
+    }
+    else
+    {
+        head = GET_NEXT(ptr); //no previous implies it was the head
     }
     if(GET_NEXT(ptr) != NULL)
     {
         PUT(GET_PREVP(GET_NEXT(ptr)), (uint)GET_PREV(ptr)); //n.next.prev = n.prev;
     }
+
+    PUT(GET_NEXTP(ptr), (uint)NULL); //replace next
+    PUT(GET_PREVP(ptr), (uint)NULL); //replace prev
 }
 
 static void *extend_heap(size_t words)
