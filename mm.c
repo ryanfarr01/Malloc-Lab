@@ -223,7 +223,7 @@ static void place(void *ptr, size_t asize)
 
     size_t csize = GET_SIZE(ptr);
 
-    if((csize - asize) > BLOCK) 
+    if((csize - asize) >= BLOCK) 
     {
         printf("Splitting\n");
         //split
@@ -375,8 +375,11 @@ void find_and_place(void * ptr)
 
     if(GET_SIZE(head) >= current_size)
     {
+        if(head == ptr) { return; }
+        
         PUT(GET_PREVP(head), (uint)ptr);
         PUT(GET_NEXTP(ptr), (uint)head);
+        PUT(GET_PREVP(ptr), (uint)NULL);
 
         head = ptr;
         return;
