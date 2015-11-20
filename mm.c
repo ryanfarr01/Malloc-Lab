@@ -83,6 +83,8 @@ team_t team = {
 static void place(void *bp, size_t asize);
 static void *coalesce(void *bp);
 static void *extend_heap(size_t words);
+static void remove_node_references(void *ptr);
+void find_and_place(void * ptr);
 int mm_check(void);
 
 
@@ -99,17 +101,14 @@ int mm_init(void)
         return -1;
 
     PUT(heap_listp, 0); //padding so that we have offset for 8-byte alignment
-    PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1)); //header setting free bit to true
-    PUT(heap_listp + (2*WSIZE), (unsigned int)NULL); //next
-    PUT(heap_listp + (3*WSIZE), (unsigned int)NULL); //prev
-    PUT(heap_listp + BLOCK, PACK(DSIZE, 1)); //footer
-    PUT(heap_listp + WSIZE + BLOCK, PACK(0, 1)); //tail
+    PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1)); //header setting free bit to false
+    PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1)); //footer
+    PUT(heap_listp + (3*WSIZE), PACK(0, 1)); //tail
 
-    // heap_listp = heap_listp + WSIZE;
-    head = heap_listp + WSIZE; //head points to header
+    head = NULL;//heap_listp + WSIZE; //head points to header
 
     //extend the empty heap with a free block of CHUNKSIZE bytes
-    if(extend_heap(CHUNKSIZE) == NULL)
+    if((extend_heap(CHUNKSIZE) ) == NULL)
         return -1;
 
     return 0;
@@ -121,19 +120,23 @@ int mm_init(void)
  */
 void *mm_malloc(size_t size)
 {
+    printf("In malloc with size: %d\n", size);
+
+    void* printPtr = head;
+    printf("\nheadInitial -> ");
+    while(printPtr != NULL)
+    {
+        printf("%p(%d) -> ", printPtr, GET_SIZE(printPtr));
+        printPtr = GET_NEXT(printPtr);
+    }
+    printf("\n\n");
+
     size_t asize; //adjusted block size
     size_t extendsize; //amount to extend heap if no fit
     void *bp = head;
     void *dest = NULL;
 
-    void* printPtr = head;
-    printf("\nhead -> ");
-    while(printPtr != NULL)
-    {
-        printf("%p(%d) -> " printPtr, GET_SIZE(printPtr));
-        printPtr = GET_NEXT(printPtr);
-    }
-    printf("\n\n");
+    
 
     //Ignore 0 mallocs
     if(size == 0) { return NULL; }
@@ -146,12 +149,18 @@ void *mm_malloc(size_t size)
 
 
     //Search over list to find 
-    while(GET_SIZE(bp) < asize && GET_NEXT(bp) != NULL)
+    while(bp != NULL)
     {
+        if(GET_SIZE(bp) >= asize)
+        {
+            dest = bp;
+            break;
+        }
+
         bp = GET_NEXT(bp);
     }
 
-    if(GET_SIZE(bp) >= asize) { dest = bp + WSIZE; } //bp is currently a header
+    // if(GET_SIZE(bp) >= asize) { dest = bp; } //bp is currently a header
 
     if(dest == NULL)
     {
@@ -170,6 +179,16 @@ void *mm_malloc(size_t size)
     
 
     place(dest, asize);
+
+    printPtr = head;
+    printf("\nheadFinal -> ");
+    while(printPtr != NULL)
+    {
+        printf("%p(%d) -> ", printPtr, GET_SIZE(printPtr));
+        printPtr = GET_NEXT(printPtr);
+    }
+    printf("\n\n");
+
     return dest + WSIZE; //offset back from header
 }
 
@@ -178,6 +197,17 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
+    printf("In free with pointer: %p\n", ptr);
+
+    void *printPtr = head;
+    printf("\nheadInitialFree -> ");
+    while(printPtr != NULL)
+    {
+        printf("%p(%d) -> ", printPtr, GET_SIZE(printPtr));
+        printPtr = GET_NEXT(printPtr);
+    }
+    printf("\n\n");
+
     size_t size = GET_SIZE(HDRP(ptr));
 
     PUT(HDRP(ptr), PACK(size, 0));
@@ -185,21 +215,32 @@ void mm_free(void *ptr)
 
     void* newPtr = coalesce(HDRP(ptr));
 
-    //place around closest memory
-    if(newPtr != head)
-    {
-        // if(GET_NEXT(head) != NULL) 
-        // { 
-        //     PUT(GET_PREVP(GET_NEXT(head)), newPtr); 
-        //     PUT(GET_NEXTP(newPtr), GET_NEXT(head));
-        // }
-        // else
-        // {
-        //     PUT(GET_NEXTP(newPtr), (uint)NULL);
-        // }
+    find_and_place(newPtr);
 
-        // head = newPtr;
+    printPtr = head;
+    printf("\nheadFinalFree -> ");
+    while(printPtr != NULL)
+    {
+        printf("%p(%d) -> ", printPtr, GET_SIZE(printPtr));
+        printPtr = GET_NEXT(printPtr);
     }
+    printf("\n\n");
+
+    //place around closest memory
+    // if(newPtr != head)
+    // {
+    //     // if(GET_NEXT(head) != NULL) 
+    //     // { 
+    //     //     PUT(GET_PREVP(GET_NEXT(head)), newPtr); 
+    //     //     PUT(GET_NEXTP(newPtr), GET_NEXT(head));
+    //     // }
+    //     // else
+    //     // {
+    //     //     PUT(GET_NEXTP(newPtr), (uint)NULL);
+    //     // }
+
+    //     // head = newPtr;
+    // }
 
     // size_t size = GET_SIZE(HDRP(ptr));
 
@@ -214,6 +255,8 @@ void mm_free(void *ptr)
  */
 void *mm_realloc(void *ptr, size_t size)
 {
+    printf("In realloc\n");
+
     void *oldptr = ptr;
     void *newptr;
 
@@ -256,10 +299,13 @@ void *mm_realloc(void *ptr, size_t size)
 //ptr should be pointing to a header, not block
 static void place(void *ptr, size_t asize)
 {
+    printf("In place\n");
+
     size_t csize = GET_SIZE(ptr);
 
     if((csize - asize) >= BLOCK) 
     {
+        printf("Splitting\n");
         //split
         //Change current header
         PUT(ptr, PACK(asize, 1));
@@ -269,22 +315,38 @@ static void place(void *ptr, size_t asize)
         void* nextB = NEXT_BLKP(ptr + WSIZE); //Returns a block pointer
         PUT(HDRP(nextB), PACK(csize-asize, 0));
         PUT(FTRP(nextB), PACK(csize-asize, 0));
+        PUT(nextB, (uint)NULL); //header
+        PUT(nextB + WSIZE, (uint)NULL); //footer
+
+        void* nextBH = HDRP(nextB);
+        if(head == ptr)
+        {
+            printf("Setting head as right side of split\n");
+            head = nextBH;
+        }
 
         //Fix doubly linked list
-        void* nextBH = HDRP(nextB);
         if(GET_NEXT(ptr) != NULL) 
         { 
+            printf("Have a next\n");
             PUT(GET_PREVP(nextBH), (uint)GET_PREV(ptr)); //n_1.prev = n.prev;
             PUT(GET_NEXTP(GET_PREV(ptr)), (uint)nextBH); //n.prev.next = n_1;
         }
         if(GET_PREV(ptr) != NULL) 
         { 
+            printf("Have a prev\n");
             PUT(GET_NEXTP(nextBH), (uint)GET_NEXT(ptr)); //n_1.next = n.next
             PUT(GET_PREVP(GET_NEXT(ptr)), (uint)nextBH); //n.next.prev = n_1;
         }
+        printf("Ended split\n");
     }
     else
     {
+        if(head == ptr)
+        {
+            head = NULL;
+        }
+
         //Change current header
         PUT(ptr, PACK(csize, 1));
         PUT(FTRP(ptr + WSIZE), PACK(csize, 1));
@@ -315,6 +377,8 @@ static void place(void *ptr, size_t asize)
 */
 static void *coalesce(void *ptr)
 {
+    printf("In coalesce\n");
+
     void* nextH = HDRP(NEXT_BLKP(ptr + WSIZE));
     void* prevH = HDRP(PREV_BLKP(ptr + WSIZE));
 
@@ -356,23 +420,84 @@ static void *coalesce(void *ptr)
         ptr = PREV_BLKP(ptr + WSIZE);
     }
 
+    PUT(GET_NEXTP(ptr), (uint)NULL); //place null for next
+    PUT(GET_PREVP(ptr), (uint)NULL); //place null for prev
+
     return ptr;
+}
+
+void find_and_place(void * ptr)
+{
+    printf("In find_and_place\n");
+
+    void* current = head;
+    size_t current_size = GET_SIZE(ptr);
+
+    if(head == NULL) 
+    {
+        head = ptr;
+        return;
+    }
+
+    if(GET_SIZE(head) >= current_size)
+    {
+        PUT(GET_PREVP(head), (uint)ptr);
+        PUT(GET_NEXTP(ptr), (uint)head);
+
+        head = ptr;
+        return;
+    }
+
+    void* next = GET_NEXT(current);
+    while(next != NULL)
+    {
+        if(GET_SIZE(next) >= current_size)
+        {
+            //next.prev = ptr
+            PUT(GET_PREVP(next), (uint)ptr);
+
+            //current.next = ptr
+            PUT(GET_NEXTP(current), (uint)ptr);
+
+            //ptr.next = next;
+            PUT(GET_NEXTP(ptr), (uint)next);
+
+            //ptr.prev = current; 
+            PUT(GET_PREVP(ptr), (uint)current);
+            return;
+        }
+
+        current = next;
+        next = GET_NEXT(current);
+    }
+
+    //Reached end
+
+    //current.next = ptr
+    PUT(GET_NEXTP(current), (uint)ptr);
+
+    //ptr.prev = current
+    PUT(GET_PREVP(ptr), (uint)current);
 }
 
 static void remove_node_references(void *ptr)
 {
+    if(ptr == head) { head = NULL; }
+
     if(GET_PREV(ptr) != NULL)
     {
-        PUT(GET_NEXTP(GET_PREV(ptr)), GET_NEXT(ptr)); //n.prev.next = n.next;
+        PUT(GET_NEXTP(GET_PREV(ptr)), (uint)GET_NEXT(ptr)); //n.prev.next = n.next;
     }
     if(GET_NEXT(ptr) != NULL)
     {
-        PUT(GET_PREVP(GET_NEXT(ptr)), GET_PREV(ptr)); //n.next.prev = n.prev;
+        PUT(GET_PREVP(GET_NEXT(ptr)), (uint)GET_PREV(ptr)); //n.next.prev = n.prev;
     }
 }
 
 static void *extend_heap(size_t words)
 {
+    printf("In extend_heap\n");
+
     char *bp;
     size_t size;
 
@@ -394,8 +519,9 @@ static void *extend_heap(size_t words)
     ptr = coalesce(ptr);
 
     //Find place for ptr
+    find_and_place(ptr);
 
-    return  coalesce(ptr);
+    return  ptr;
 }
 
 int mm_check(void)
