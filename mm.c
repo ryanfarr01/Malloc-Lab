@@ -49,7 +49,8 @@ team_t team = {
 #define DSIZE 8
 #define BLOCK 16 //Block size required to fit header (1 word), two pointers (1 word each), and footer (1 word)
 #define CHUNKSIZE (1<<12)
-#define free_list_size 32
+#define FREE_LIST_SIZE 32
+#define REALLOCATION_SIZE (1 << 8)
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #define MIN(x, y) ((x) > (y) ? (y) : (x))
@@ -106,7 +107,7 @@ int freeCalls = 1; //DELETE
 int mm_init(void)
 {
     //Allocate the memory for the free list
-    free_list = mem_sbrk(free_list_size*WSIZE);
+    free_list = mem_sbrk(FREE_LIST_SIZE*WSIZE);
 
     //Create the initial empty heap
     if((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1)
@@ -118,7 +119,7 @@ int mm_init(void)
     PUT(heap_listp + (3*WSIZE), PACK(0, 1)); //tail
 
     int i;
-    for(i = 0; i < free_list_size; i++) { free_list[i] = NULL; }
+    for(i = 0; i < FREE_LIST_SIZE; i++) { free_list[i] = NULL; }
 
     //extend the empty heap with a free block of CHUNKSIZE bytes
     if((extend_heap(CHUNKSIZE) ) == NULL)
@@ -205,8 +206,10 @@ void *mm_realloc(void *ptr, size_t size)
 {
     //printf("\nIn realloc\n");
 
+    size_t asize;
     void *oldptr = ptr;
     void *newptr;
+    void *ptrH = HDRP(ptr);
 
     if(ptr == NULL) { return mm_malloc(size); }
     if(size == 0)
@@ -215,12 +218,53 @@ void *mm_realloc(void *ptr, size_t size)
         return ptr;
     }
 
-    newptr = mm_malloc(size);
+    //adjust block size to include overhead and alignment requirements
+    if(size <= DSIZE)
+        asize = 2*DSIZE;
+    else
+        asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE);
+
+    size_t new_size;
+    size_t old_size = GET_SIZE(ptrH);
+    void* next = HDRP(NEXT_BLKP(ptr));
+
+    if(old_size >= asize)
+    {
+        return ptr;
+    }
+
+    //If the next block is empty, check and see if it's big enough 
+    if(!GET_ALLOC(next))
+    {
+        new_size = old_size + GET_SIZE(next);
+        if(new_size >= asize) //Can simply use the next block for allocation
+        {
+            remove_node_references(next);
+
+            PUT(ptrH, PACK(new_size, 1));
+            PUT(FTRP(next + WSIZE), PACK(new_size, 1));
+
+            return ptr;
+        }
+    }
+
+    new_size = asize + REALLOCATION_SIZE;
+    newptr = mm_malloc(new_size);
     if(newptr == NULL) { return NULL; }
 
     memcpy(newptr, oldptr, MIN(GET_SIZE(HDRP(oldptr)), size));
+
+
+
     mm_free(oldptr);
     return newptr;
+
+    // newptr = mm_malloc(size);
+    // if(newptr == NULL) { return NULL; }
+
+    // memcpy(newptr, oldptr, MIN(GET_SIZE(HDRP(oldptr)), size));
+    // mm_free(oldptr);
+    // return newptr;
 }
 
 void* find_fit(size_t size)
@@ -231,7 +275,7 @@ void* find_fit(size_t size)
 
     //Search over list to find 
     int i;
-    for(i = listIndex; i < free_list_size; i++)
+    for(i = listIndex; i < FREE_LIST_SIZE; i++)
     {
         bp = free_list[i];
         while(bp != NULL)
@@ -254,6 +298,7 @@ static void place(void *ptr, size_t asize)
     //printf("In place\n");
 
     size_t csize = GET_SIZE(ptr);
+    remove_node_references(ptr);
 
     if((csize - asize) >= BLOCK) 
     {
@@ -272,42 +317,13 @@ static void place(void *ptr, size_t asize)
 
         void* nextBH = HDRP(nextB);
 
-        PUT(GET_PREVP(nextBH), (uint)GET_PREV(ptr)); //n_1.prev = n.prev;
-        PUT(GET_NEXTP(nextBH), (uint)GET_NEXT(ptr)); //n_1.next = n.next
-
-        //Fix doubly linked list
-        if(GET_NEXT(ptr) != NULL) 
-        { 
-            //printf("Have a next\n");
-            PUT(GET_PREVP(GET_NEXT(ptr)), (uint)nextBH); //n.next.prev = n_1;
-        }
-        if(GET_PREV(ptr) != NULL) 
-        { 
-            //printf("Have a prev\n");
-            PUT(GET_NEXTP(GET_PREV(ptr)), (uint)nextBH); //n.prev.next = n_1;
-        }
-        else //no prev implies it's the head
-        {
-            void** h = is_head(ptr);
-            //printf("Setting head as right side of split\n");
-            PUT(h, (uint)nextBH); //*h = nextBH;
-        }
-        //printf("Ended split\n");
+        find_and_place(nextBH);
     }
     else
     {
         //Change current header
         PUT(ptr, PACK(csize, 1));
         PUT(FTRP(ptr + WSIZE), PACK(csize, 1));
-
-        //Alter doubly linked list
-        if(GET_NEXT(ptr) != NULL) { PUT(GET_PREVP(GET_NEXT(ptr)), (uint)GET_PREV(ptr)); }
-        if(GET_PREV(ptr) != NULL) { PUT(GET_NEXTP(GET_PREV(ptr)), (uint)GET_NEXT(ptr)); }
-        else
-        {
-            void** h = is_head(ptr);
-            PUT(h, (uint)GET_NEXT(ptr)); //*h = GET_NEXT(ptr);
-        }
     }
 }
 
@@ -337,12 +353,6 @@ static void *coalesce(void *ptr)
         size += GET_SIZE(nextH);
         PUT(ptr, PACK(size, 0));
         PUT(FTRP(ptr + WSIZE), PACK(size, 0));
-
-        // void** h;
-        // if((h = is_head(nextH)) != NULL) 
-        // { 
-        //     PUT(h, (uint)GET_NEXT(nextH)); //*h = GET_NEXT(nextH); 
-        // }
     } 
     else if(!prev_alloc && next_alloc) 
     { //Case 3
@@ -354,12 +364,6 @@ static void *coalesce(void *ptr)
 
         PUT(HDRP(PREV_BLKP(ptr + WSIZE)), PACK(size, 0));
         PUT(FTRP(ptr + WSIZE), PACK(size, 0));
-        
-        // void** h;
-        // if((h = is_head(prevH)) != NULL) 
-        // { 
-        //     PUT(h, (uint)GET_NEXT(prevH)); //*h = GET_NEXT(prevH); 
-        // }
         
 
         ptr = HDRP(PREV_BLKP(ptr + WSIZE));
@@ -377,26 +381,6 @@ static void *coalesce(void *ptr)
         PUT(HDRP(PREV_BLKP(ptr + WSIZE)), PACK(size, 0));
         PUT(FTRP(NEXT_BLKP(ptr + WSIZE)), PACK(size, 0));
 
-        // void** h1 = is_head(prevH);
-        // void** h2 = is_head(nextH);
-        // while((h1 = is_head(prevH)) != NULL || (h2 = is_head(nextH)) != NULL)
-        // {
-        //     if(h1 != NULL) 
-        //     { 
-        //         PUT(h1, (uint)GET_NEXT(prevH)); 
-        //         // PUT(GET_NEXTP(prevH), (uint)NULL);
-        //     }// *h1 = GET_NEXT(head); }
-        //     if(h2 != NULL) 
-        //     { 
-        //         PUT(h2, (uint)GET_NEXT(nextH));
-        //         remove_node_references(nextH); 
-        //         // PUT(GET_NEXTP(prevH), (uint)NULL);
-        //     }// *h2 = GET_NEXT(head); }
-        // }
-
-        // remove_node_references(prevH);
-        // remove_node_references(nextH);
-
         ptr = HDRP(PREV_BLKP(ptr + WSIZE));
     }
 
@@ -410,7 +394,7 @@ void** is_head(void* ptr)
 {
     void* head;
     int i;
-    for(i = 0; i < free_list_size; i++)
+    for(i = 0; i < FREE_LIST_SIZE; i++)
     {
         head = free_list[i];
         if(ptr == head) { return &free_list[i]; }
@@ -424,17 +408,53 @@ void find_and_place(void * ptr)
     //printf("In find_and_place\n");
 
     int listIndex = get_list_index(GET_SIZE(ptr));
-    void* head = free_list[listIndex];
-    PUT(GET_NEXTP(ptr), (uint)NULL);
-    PUT(GET_PREVP(ptr), (uint)NULL);
+    void* current = free_list[listIndex];
 
-    if(head != NULL)
+    if(current == NULL) //Case: empty list
     {
-        //printf("Head: %p\n", head);
-        PUT(GET_PREVP(head), (uint)ptr);
+        free_list[listIndex] = ptr;
+
+        return;
     }
-    PUT(GET_NEXTP(ptr), (uint)head);
-    free_list[listIndex] = ptr;
+
+    if(ptr < current) //should be first in the list
+    {
+        PUT(GET_PREVP(current), (uint)ptr); //h.prev = n
+        PUT(GET_NEXTP(ptr), (uint)current); //n.next = h;
+        free_list[listIndex] = ptr;
+
+        return;
+    }
+
+    void* next;
+    while((next = GET_NEXT(current)) != NULL) //case: somewhere in the middle
+    {
+        if(next > ptr)
+        {
+            PUT(GET_NEXTP(current), (uint)ptr);
+            PUT(GET_PREVP(next), (uint)ptr);
+
+            PUT(GET_PREVP(ptr), (uint)current);
+            PUT(GET_NEXTP(ptr), (uint)next);
+
+            return;
+        }
+
+        current = GET_NEXT(current);
+    }
+
+    //Place at the end
+    PUT(GET_NEXTP(current), (uint)ptr);
+    PUT(GET_PREVP(ptr), (uint)current);
+
+
+    // if(head != NULL)
+    // {
+    //     //printf("Head: %p\n", head);
+    //     PUT(GET_PREVP(head), (uint)ptr);
+    // }
+    // PUT(GET_NEXTP(ptr), (uint)head);
+    // free_list[listIndex] = ptr;
 }
 
 static void remove_node_references(void *ptr)
@@ -576,7 +596,7 @@ int in_free_list(void* ptr)
     void* current;
 
     int i;
-    for(i = 0; i < free_list_size; i++)
+    for(i = 0; i < FREE_LIST_SIZE; i++)
     {
         current = free_list[i];
 
