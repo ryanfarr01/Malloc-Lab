@@ -135,12 +135,12 @@ int mm_init(void)
  */
 void *mm_malloc(size_t size)
 {
-    printf("\nIn malloc %d with size: %d\n", mallocCalls++, size);
-    if(mm_check())
-    {
-        printf("Broken\n");
-        exit(1);
-    }
+    //printf("\nIn malloc %d with size: %d\n", mallocCalls++, size);
+    // if(mm_check())
+    // {
+    //     //printf("Broken\n");
+    //     exit(1);
+    // }
 
     size_t asize; //adjusted block size
     size_t extendsize; //amount to extend heap if no fit
@@ -176,12 +176,12 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
-    printf("\nIn free %d with pointer: %p\n", freeCalls++, ptr);
-    if(mm_check())
-    {
-        printf("Broken\n");
-        exit(1);
-    }
+    //printf("\nIn free %d with pointer: %p\n", freeCalls++, ptr);
+    // if(mm_check())
+    // {
+    //     //printf("Broken\n");
+    //     exit(1);
+    // }
 
 
     size_t size = GET_SIZE(HDRP(ptr));
@@ -203,7 +203,7 @@ void mm_free(void *ptr)
  */
 void *mm_realloc(void *ptr, size_t size)
 {
-    printf("\nIn realloc\n");
+    //printf("\nIn realloc\n");
 
     void *oldptr = ptr;
     void *newptr;
@@ -251,13 +251,13 @@ void* find_fit(size_t size)
 //ptr should be pointing to a header, not block
 static void place(void *ptr, size_t asize)
 {
-    printf("In place\n");
+    //printf("In place\n");
 
     size_t csize = GET_SIZE(ptr);
 
     if((csize - asize) >= BLOCK) 
     {
-        printf("Splitting\n");
+        //printf("Splitting\n");
         //split
         //Change current header
         PUT(ptr, PACK(asize, 1));
@@ -278,21 +278,21 @@ static void place(void *ptr, size_t asize)
         //Fix doubly linked list
         if(GET_NEXT(ptr) != NULL) 
         { 
-            printf("Have a next\n");
+            //printf("Have a next\n");
             PUT(GET_PREVP(GET_NEXT(ptr)), (uint)nextBH); //n.next.prev = n_1;
         }
         if(GET_PREV(ptr) != NULL) 
         { 
-            printf("Have a prev\n");
+            //printf("Have a prev\n");
             PUT(GET_NEXTP(GET_PREV(ptr)), (uint)nextBH); //n.prev.next = n_1;
         }
         else //no prev implies it's the head
         {
             void** h = is_head(ptr);
-            printf("Setting head as right side of split\n");
+            //printf("Setting head as right side of split\n");
             PUT(h, (uint)nextBH); //*h = nextBH;
         }
-        printf("Ended split\n");
+        //printf("Ended split\n");
     }
     else
     {
@@ -316,7 +316,7 @@ static void place(void *ptr, size_t asize)
 */
 static void *coalesce(void *ptr)
 {
-    printf("In coalesce\n");
+    //printf("In coalesce\n");
     void* nextH = HDRP(NEXT_BLKP(ptr + WSIZE));
     void* prevH = HDRP(PREV_BLKP(ptr + WSIZE));
 
@@ -326,70 +326,76 @@ static void *coalesce(void *ptr)
 
     if(prev_alloc && next_alloc)  
     { //Case 1
-        printf("case 1\n");
+        //printf("case 1\n");
     }
     else if(prev_alloc && !next_alloc) 
     { //Case 2
-        printf("case 2\n");
+        //printf("case 2\n");
+
+        remove_node_references(nextH);
+
         size += GET_SIZE(nextH);
         PUT(ptr, PACK(size, 0));
         PUT(FTRP(ptr + WSIZE), PACK(size, 0));
 
-        void** h;
-        if((h = is_head(nextH)) != NULL) 
-        { 
-            PUT(h, (uint)GET_NEXT(nextH)); //*h = GET_NEXT(nextH); 
-        }
-
-        remove_node_references(nextH);
+        // void** h;
+        // if((h = is_head(nextH)) != NULL) 
+        // { 
+        //     PUT(h, (uint)GET_NEXT(nextH)); //*h = GET_NEXT(nextH); 
+        // }
     } 
     else if(!prev_alloc && next_alloc) 
     { //Case 3
-        printf("case 3\n");
+        //printf("case 3\n");
+        
+        remove_node_references(prevH);
+        
         size += GET_SIZE(prevH);
 
         PUT(HDRP(PREV_BLKP(ptr + WSIZE)), PACK(size, 0));
         PUT(FTRP(ptr + WSIZE), PACK(size, 0));
         
-        void** h;
-        if((h = is_head(prevH)) != NULL) 
-        { 
-            PUT(h, (uint)GET_NEXT(prevH)); //*h = GET_NEXT(prevH); 
-        }
+        // void** h;
+        // if((h = is_head(prevH)) != NULL) 
+        // { 
+        //     PUT(h, (uint)GET_NEXT(prevH)); //*h = GET_NEXT(prevH); 
+        // }
         
-        remove_node_references(prevH);
 
         ptr = HDRP(PREV_BLKP(ptr + WSIZE));
-        printf("end of case 3\n");
+        //printf("end of case 3\n");
     }
     else 
     { //Case 4
-        printf("case 4\n");
+        //printf("case 4\n");
+
+        remove_node_references(prevH);
+        remove_node_references(nextH);
+
         size += GET_SIZE(prevH) + GET_SIZE(nextH);
 
         PUT(HDRP(PREV_BLKP(ptr + WSIZE)), PACK(size, 0));
         PUT(FTRP(NEXT_BLKP(ptr + WSIZE)), PACK(size, 0));
-        
-        void** h1 = is_head(prevH);
-        void** h2 = is_head(nextH);
-        while((h1 = is_head(prevH)) != NULL || (h2 = is_head(nextH)) != NULL)
-        {
-            if(h1 != NULL) 
-            { 
-                PUT(h1, (uint)GET_NEXT(prevH)); 
-                remove_node_references(prevH);
-                // PUT(GET_NEXTP(prevH), (uint)NULL);
-            }// *h1 = GET_NEXT(head); }
-            if(h2 != NULL) 
-            { 
-                PUT(h2, (uint)GET_NEXT(nextH));
-                remove_node_references(nextH); 
-                // PUT(GET_NEXTP(prevH), (uint)NULL);
-            }// *h2 = GET_NEXT(head); }
-        }
 
-        remove_node_references(prevH);
-        remove_node_references(nextH);
+        // void** h1 = is_head(prevH);
+        // void** h2 = is_head(nextH);
+        // while((h1 = is_head(prevH)) != NULL || (h2 = is_head(nextH)) != NULL)
+        // {
+        //     if(h1 != NULL) 
+        //     { 
+        //         PUT(h1, (uint)GET_NEXT(prevH)); 
+        //         // PUT(GET_NEXTP(prevH), (uint)NULL);
+        //     }// *h1 = GET_NEXT(head); }
+        //     if(h2 != NULL) 
+        //     { 
+        //         PUT(h2, (uint)GET_NEXT(nextH));
+        //         remove_node_references(nextH); 
+        //         // PUT(GET_NEXTP(prevH), (uint)NULL);
+        //     }// *h2 = GET_NEXT(head); }
+        // }
+
+        // remove_node_references(prevH);
+        // remove_node_references(nextH);
 
         ptr = HDRP(PREV_BLKP(ptr + WSIZE));
     }
@@ -415,7 +421,7 @@ void** is_head(void* ptr)
 
 void find_and_place(void * ptr)
 {
-    printf("In find_and_place\n");
+    //printf("In find_and_place\n");
 
     int listIndex = get_list_index(GET_SIZE(ptr));
     void* head = free_list[listIndex];
@@ -424,7 +430,7 @@ void find_and_place(void * ptr)
 
     if(head != NULL)
     {
-        printf("Head: %p\n", head);
+        //printf("Head: %p\n", head);
         PUT(GET_PREVP(head), (uint)ptr);
     }
     PUT(GET_NEXTP(ptr), (uint)head);
@@ -433,15 +439,16 @@ void find_and_place(void * ptr)
 
 static void remove_node_references(void *ptr)
 {
-    printf("In remove_node_references\n");
-    int listIndex = GET_SIZE(ptr);
+    //printf("In remove_node_references\n");
+    // int listIndex = GET_SIZE(ptr);
     if(GET_PREV(ptr) != NULL)
     {
         PUT(GET_NEXTP(GET_PREV(ptr)), (uint)GET_NEXT(ptr)); //n.prev.next = n.next;
     }
     else
     {
-        free_list[listIndex] = GET_NEXT(ptr); //no previous implies it was a head
+        void** h = is_head(ptr);
+        PUT(h, (uint)GET_NEXT(ptr)); //no previous implies it was a head
     }
     if(GET_NEXT(ptr) != NULL)
     {
@@ -450,12 +457,12 @@ static void remove_node_references(void *ptr)
 
     PUT(GET_NEXTP(ptr), (uint)NULL); //replace next
     PUT(GET_PREVP(ptr), (uint)NULL); //replace prev
-    printf("Leaving remove_node_references\n");
+    //printf("Leaving remove_node_references\n");
 }
 
 static void *extend_heap(size_t words)
 {
-    printf("In extend_heap\n");
+    //printf("In extend_heap\n");
 
     char *bp;
     size_t size;
@@ -496,21 +503,21 @@ int get_list_index(uint size)
 
 void print_list(int listIndex, int initial)
 {
-    if(initial) { printf("Initial: "); }
-    else {printf("final: ");}
+    // if(initial) { //printf("Initial: "); }
+    // else {//printf("final: ");}
 
-    int i = 0;
+    // int i = 0;
 
-    void* head = free_list[listIndex];
-    void *printPtr = head;
-    printf("%d: head -> ", listIndex);
-    while(printPtr != NULL)
-    {
-        if(i++ > 50) { printf("Infinite head\n"); exit(-1); }
-        printf("%p(%d) p: %p -> ", printPtr, GET_SIZE(printPtr), GET_PREV(printPtr));
-        printPtr = GET_NEXT(printPtr);
-    }
-    printf("null\n");
+    // void* head = free_list[listIndex];
+    // void *printPtr = head;
+    // //printf("%d: head -> ", listIndex);
+    // while(printPtr != NULL)
+    // {
+    //     if(i++ > 50) { //printf("Infinite head\n"); exit(-1); }
+    //     //printf("%p(%d) p: %p -> ", printPtr, GET_SIZE(printPtr), GET_PREV(printPtr));
+    //     printPtr = GET_NEXT(printPtr);
+    // }
+    //printf("null\n");
 }
 
 int mm_check(void)
@@ -523,14 +530,14 @@ int mm_check(void)
         {
             if(!in_free_list(ptr)) 
             { 
-                printf("%p not in free list but is unallocated\n", ptr);
+                //printf("%p not in free list but is unallocated\n", ptr);
                 return 1; 
             }
             if(GET_PREV(ptr) != NULL)
             {
                 if(GET_NEXT(GET_PREV(ptr)) != ptr)
                 {
-                    printf("The next's previous isn't this\n");
+                    //printf("The next's previous isn't this\n");
                     return 1;
                 }
             }
@@ -538,7 +545,7 @@ int mm_check(void)
             {
                 if(GET_PREV(GET_NEXT(ptr)) != ptr)
                 {
-                    printf("The prev's next isn't this\n");
+                    //printf("The prev's next isn't this\n");
                     return 1;
                 }
             }
@@ -547,8 +554,7 @@ int mm_check(void)
         {
             if(in_free_list(ptr)) 
             { 
-                PUT(-1, 0); //break; DELETE
-                printf("%p in free list but is allocated\n", ptr);
+                //printf("%p in free list but is allocated\n", ptr);
                 return 1; 
             }
         }
@@ -558,7 +564,7 @@ int mm_check(void)
 
     if(GET_SIZE(ptr) != 0) 
     { 
-        printf("broken?\n");
+        //printf("broken?\n");
         return 1; 
     }
 
