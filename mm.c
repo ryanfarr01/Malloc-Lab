@@ -50,7 +50,7 @@ team_t team = {
 #define BLOCK 16 //Block size required to fit header (1 word), two pointers (1 word each), and footer (1 word)
 #define CHUNKSIZE (1<<12)
 #define FREE_LIST_SIZE 32
-#define REALLOCATION_SIZE (1 << 8)
+#define REALLOCATION_SIZE (1 << 9)
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #define MIN(x, y) ((x) > (y) ? (y) : (x))
