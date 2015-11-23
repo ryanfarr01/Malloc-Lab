@@ -399,6 +399,11 @@ static void *coalesce(void *ptr)
     return ptr;
 }
 
+/*
+ * is_head - Checks that if the pointer is in the list it is a 
+ *           head.
+ *
+ */
 void** is_head(void* ptr)
 {
     void* head;
@@ -467,6 +472,10 @@ void find_and_place(void * ptr)
     PUT(GET_PREVP(ptr), (uint)current);
 }
 
+/*
+ * remove_node_reference - Modifies the pointers so that the pasesed in pointer will no
+ *                         will no longer be in the free list.
+ */
 static void remove_node_references(void *ptr)
 {
     if(GET_PREV(ptr) != NULL)
@@ -487,6 +496,15 @@ static void remove_node_references(void *ptr)
     PUT(GET_PREVP(ptr), (uint)NULL); //replace prev
 }
 
+
+/*
+ * extend_heap - Extends the heap size by taking the requested size (words)
+ *               and rounds it up to the mearest multiple of 2 words then requests 
+ *               additional heap space from the momory system by calling mm_sbrk().
+ *               Update the prev, next, header and footer then coalesce if the previous
+ *               block was free then find and place for the pointer.
+ *
+ */
 static void *extend_heap(size_t words)
 {
     char *bp;
@@ -515,11 +533,15 @@ static void *extend_heap(size_t words)
     return  ptr;
 }
 
+<<<<<<< Updated upstream
 /*
  * get_list_index - Determines the index in the free list of the size passed in.
  *                  This is based on the leftmost bit. The index starts at 0 and becomes
  *                  the number of bits before the leftmost 1 value. 
  */
+=======
+
+>>>>>>> Stashed changes
 int get_list_index(uint size)
 {
     int index = 0; //Start at 0
@@ -599,6 +621,11 @@ int mm_check(void)
     return 0;
 }
 
+/*
+ * in_free_list - Checks to ensure that the passed in pointer is contained 
+ *                within the free list.
+ *
+ */
 int in_free_list(void* ptr)
 {
     void* current;
