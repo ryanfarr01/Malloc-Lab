@@ -533,15 +533,11 @@ static void *extend_heap(size_t words)
     return  ptr;
 }
 
-<<<<<<< Updated upstream
 /*
  * get_list_index - Determines the index in the free list of the size passed in.
  *                  This is based on the leftmost bit. The index starts at 0 and becomes
  *                  the number of bits before the leftmost 1 value. 
  */
-=======
-
->>>>>>> Stashed changes
 int get_list_index(uint size)
 {
     int index = 0; //Start at 0
