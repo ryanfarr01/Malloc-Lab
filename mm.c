@@ -1,13 +1,18 @@
 /*
- * mm-naive.c - The fastest, least memory-efficient malloc package.
+ * mm-naive.c
  * 
- * In this naive approach, a block is allocated by simply incrementing
- * the brk pointer.  A block is pure payload. There are no headers or
- * footers.  Blocks are never coalesced or reused. Realloc is
- * implemented directly using mm_malloc and mm_free.
+ * This implementation uses segregated explicit free lists. That is, there 
+ * is an array that contains pointers to the heads of free lists. The array
+ * is FREE_LIST_SIZE(32) long, and each entry points to free lists with memory
+ * [n^2, n^(2+1)) relative to the previous entry.
  *
- * NOTE TO STUDENTS: Replace this header comment with your own header
- * comment that gives a high level description of your solution.
+ * Each block requires at least 4 words. One word is used for the header,
+ * one word for the next pointer, one word for the prev pointer, and one
+ * word for the footer. The header and footer are identical and use the first
+ * three bits to indicate if the memory is free or allocated (1 is allocated)
+ * with the remaining bits indicating the size of the block. Each next and prev
+ * pointers point to the headers of the next and prev blocks, respectively.
+ * If a block is allocated, then there is no next and prev pointer.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,10 +23,6 @@
 #include "mm.h"
 #include "memlib.h"
 
-/*********************************************************
- * NOTE TO STUDENTS: Before you do anything else, please
- * provide your identifying information in the following struct.
- ********************************************************/
 team_t team = {
     /* Team name */
     "The I in Team",
@@ -52,6 +53,7 @@ team_t team = {
 #define FREE_LIST_SIZE 32
 #define REALLOCATION_SIZE (1 << 9)
 
+//Max and Min of two numbers
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #define MIN(x, y) ((x) > (y) ? (y) : (x))
 
@@ -77,11 +79,11 @@ team_t team = {
 //Address of .next and .prev, respectively. ptr must be header address
 #define GET_NEXT(ptr) (*(char **) (ptr + WSIZE))
 #define GET_PREV(ptr) (*(char **) (ptr + 2*WSIZE))
+
+//Address that stores the pointers to next and prev respectively
 #define GET_NEXTP(ptr) ((char *) ptr + WSIZE)
 #define GET_PREVP(ptr) ((char *) ptr + 2*WSIZE)
 
-
-// static void *find_fit(size_t asize);
 static void place(void *bp, size_t asize);
 static void *coalesce(void *bp);
 static void *extend_heap(size_t words);
@@ -89,57 +91,55 @@ static void remove_node_references(void *ptr);
 void find_and_place(void * ptr);
 int mm_check(void);
 int in_free_list(void*);
-void print_list(int listIndex, int initial);
 int get_list_index(uint size);
 void* find_fit(size_t size);
 void** is_head(void* ptr);
 
-void* heap_listp;
-// void* head;
-void **free_list;
-
-int mallocCalls = 1; //DELETE
-int freeCalls = 1; //DELETE
+void* heap_listp; //Pointer to the very first position. Used for mm_check
+void **free_list; //Array of pointers to the different lists
 
 /* 
- * mm_init - initialize the malloc package.
+ * mm_init - Initialize the prologue header and footer as well as the epilogue header.
+ *           Additionally, Grab the memory required for the array.
  */
 int mm_init(void)
 {
     //Allocate the memory for the free list
-    free_list = mem_sbrk(FREE_LIST_SIZE*WSIZE);
+    free_list = mem_sbrk(FREE_LIST_SIZE * WSIZE);
 
     //Create the initial empty heap
     if((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1)
         return -1;
 
     PUT(heap_listp, 0); //padding so that we have offset for 8-byte alignment
-    PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1)); //header setting free bit to false
+    PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1)); //header setting allocated bit to true
     PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1)); //footer
-    PUT(heap_listp + (3*WSIZE), PACK(0, 1)); //tail
+    PUT(heap_listp + (3*WSIZE), PACK(0, 1)); //epilogue header
 
     int i;
+    //Set every head to NULL initially
     for(i = 0; i < FREE_LIST_SIZE; i++) { free_list[i] = NULL; }
 
     //extend the empty heap with a free block of CHUNKSIZE bytes
     if((extend_heap(CHUNKSIZE) ) == NULL)
         return -1;
 
+    //Set up the heap_listp so that we can successfully check memory in mm_check
     heap_listp += WSIZE;
 
     return 0;
 }
 
 /* 
- * mm_malloc - Allocate a block by incrementing the brk pointer.
- *     Always allocate a block whose size is a multiple of the alignment.
+ * mm_malloc - Size 0 mallocs are ignored. Allocates a block with at least size bytes and returns
+ *             a pointer to the first byte. Simply determines the actual needed size to account for 
+ *             a header and footer, then finds the best fit in the currently free memory by going through
+ *             the free lists. If we don't have free space, then we extend the heap.
  */
 void *mm_malloc(size_t size)
 {
-    //printf("\nIn malloc %d with size: %d\n", mallocCalls++, size);
     // if(mm_check())
     // {
-    //     //printf("Broken\n");
     //     exit(1);
     // }
 
@@ -156,8 +156,10 @@ void *mm_malloc(size_t size)
     else
         asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE);
 
+    //Find the best fit
     dest = find_fit(asize);
 
+    //If NULL is returned, we need to extend the heap
     if(dest == NULL)
     {
         extendsize = MAX(asize, CHUNKSIZE);
@@ -165,53 +167,57 @@ void *mm_malloc(size_t size)
             return NULL;
     }
 
+    //Updates the pointers
     place(dest, asize);
-
-    print_list(get_list_index(asize), 0);
 
     return dest + WSIZE; //offset back from header
 }
 
 /*
- * mm_free - Freeing a block does nothing.
+ * mm_free - Frees the pointer at that address simply by updating the header and footer,
+ *           coalescing, and placing in its corresponding free list
  */
 void mm_free(void *ptr)
 {
-    //printf("\nIn free %d with pointer: %p\n", freeCalls++, ptr);
     // if(mm_check())
     // {
-    //     //printf("Broken\n");
     //     exit(1);
     // }
 
-
     size_t size = GET_SIZE(HDRP(ptr));
-    print_list(get_list_index(size), 1);
 
+    //Update to reflect that this block is now free
     PUT(HDRP(ptr), PACK(size, 0));
     PUT(FTRP(ptr), PACK(size, 0));
 
+    //See if we can combine with the surrounding memory
     void* newPtr = coalesce(HDRP(ptr));
 
+    //Place in a free list
     find_and_place(newPtr);
-
-    print_list(get_list_index(size), 0);
-    print_list(get_list_index(GET_SIZE(HDRP(ptr))), 0);
 }
 
 /*
- * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
+ * mm_realloc - If the pointer is null, we simply do an allocation. If the size is 0, then we free.
+ *              Otherwise, we check to see if the current block is big enough for the request. If it is,
+ *              we can simply return the same pointer. If it isn't, we check to see if the next block is free
+ *              and if so, combined if they could form enough memory. If so, we coalesce the two blocks and return the
+ *              original pointer. If we can't do any of these things, then as a last resort we allocate new memory,
+ *              copy the old memory into it, and free the old ptr. When we allocate the new memory we allocate the
+ *              requested with an additional buffer. This is because memory that is reallocated once is likely to be
+ *              reallocated again.
  */
 void *mm_realloc(void *ptr, size_t size)
 {
-    //printf("\nIn realloc\n");
-
-    size_t asize;
+    size_t asize; //adjusted size to include header and footer
     void *oldptr = ptr;
     void *newptr;
-    void *ptrH = HDRP(ptr);
+    void *ptrH = HDRP(ptr); //pointer to the header
 
+    //If ptr is null, we simply allocate
     if(ptr == NULL) { return mm_malloc(size); }
+    
+    //Free the pointer if the size is 0
     if(size == 0)
     {
         mm_free(ptr);
@@ -228,6 +234,7 @@ void *mm_realloc(void *ptr, size_t size)
     size_t old_size = GET_SIZE(ptrH);
     void* next = HDRP(NEXT_BLKP(ptr));
 
+    //Check to see if we can fit in the current block
     if(old_size >= asize)
     {
         return ptr;
@@ -239,6 +246,7 @@ void *mm_realloc(void *ptr, size_t size)
         new_size = old_size + GET_SIZE(next);
         if(new_size >= asize) //Can simply use the next block for allocation
         {
+            //Set the next pointer to allocated and take out of free list
             remove_node_references(next);
 
             PUT(ptrH, PACK(new_size, 1));
@@ -248,36 +256,39 @@ void *mm_realloc(void *ptr, size_t size)
         }
     }
 
+    //Otherwise we have to allocate new memory
     new_size = asize + REALLOCATION_SIZE;
     newptr = mm_malloc(new_size);
     if(newptr == NULL) { return NULL; }
 
+    //Copy the new memory
     memcpy(newptr, oldptr, MIN(GET_SIZE(HDRP(oldptr)), size));
 
-
-
+    //Free the old memory
     mm_free(oldptr);
     return newptr;
-
-    // newptr = mm_malloc(size);
-    // if(newptr == NULL) { return NULL; }
-
-    // memcpy(newptr, oldptr, MIN(GET_SIZE(HDRP(oldptr)), size));
-    // mm_free(oldptr);
-    // return newptr;
 }
 
+/*
+ * find_fit - Function to search over the free lists to determine if there is
+ *            a free block with at least the required size of memory in bytes.
+ *            Begins search at the beginning of the list that corresponds to its
+ *            memory bracket and moves up. If no block is found, returns NULL
+ */
 void* find_fit(size_t size)
 {
+    //Start at its memory bracket
     int listIndex = get_list_index(size);
-    void *bp;// = free_list[get_list_index(asize)]; //head;
-    print_list(listIndex, 1);
+    void *bp;
 
     //Search over list to find 
     int i;
     for(i = listIndex; i < FREE_LIST_SIZE; i++)
     {
+        //get head of current list
         bp = free_list[i];
+
+        //Go through list until we find a block
         while(bp != NULL)
         {
             if(GET_SIZE(bp) >= size)
@@ -292,17 +303,21 @@ void* find_fit(size_t size)
     return NULL;
 }
 
-//ptr should be pointing to a header, not block
+/*
+ * place - Takes a pointer pointing to the free block to be allocated and updates
+ *         its header, footer, and pointers in its free list. If the block is big
+ *         enough to be split, then we split it and re-place the new free block
+ */
 static void place(void *ptr, size_t asize)
 {
-    //printf("In place\n");
-
     size_t csize = GET_SIZE(ptr);
+
+    //Remove from its free list
     remove_node_references(ptr);
 
+    //If we can split
     if((csize - asize) >= BLOCK) 
     {
-        //printf("Splitting\n");
         //split
         //Change current header
         PUT(ptr, PACK(asize, 1));
@@ -327,12 +342,9 @@ static void place(void *ptr, size_t asize)
     }
 }
 
-/*
-* Combine memory and then free all ties
-*/
+
 static void *coalesce(void *ptr)
 {
-    //printf("In coalesce\n");
     void* nextH = HDRP(NEXT_BLKP(ptr + WSIZE));
     void* prevH = HDRP(PREV_BLKP(ptr + WSIZE));
 
@@ -340,14 +352,9 @@ static void *coalesce(void *ptr)
     size_t next_alloc = GET_ALLOC(nextH);
     size_t size = GET_SIZE(ptr);
 
-    if(prev_alloc && next_alloc)  
-    { //Case 1
-        //printf("case 1\n");
-    }
+    if(prev_alloc && next_alloc) { /*Case 1*/ }
     else if(prev_alloc && !next_alloc) 
     { //Case 2
-        //printf("case 2\n");
-
         remove_node_references(nextH);
 
         size += GET_SIZE(nextH);
@@ -356,8 +363,6 @@ static void *coalesce(void *ptr)
     } 
     else if(!prev_alloc && next_alloc) 
     { //Case 3
-        //printf("case 3\n");
-        
         remove_node_references(prevH);
         
         size += GET_SIZE(prevH);
@@ -367,12 +372,9 @@ static void *coalesce(void *ptr)
         
 
         ptr = HDRP(PREV_BLKP(ptr + WSIZE));
-        //printf("end of case 3\n");
     }
     else 
     { //Case 4
-        //printf("case 4\n");
-
         remove_node_references(prevH);
         remove_node_references(nextH);
 
@@ -405,8 +407,6 @@ void** is_head(void* ptr)
 
 void find_and_place(void * ptr)
 {
-    //printf("In find_and_place\n");
-
     int listIndex = get_list_index(GET_SIZE(ptr));
     void* current = free_list[listIndex];
 
@@ -446,21 +446,10 @@ void find_and_place(void * ptr)
     //Place at the end
     PUT(GET_NEXTP(current), (uint)ptr);
     PUT(GET_PREVP(ptr), (uint)current);
-
-
-    // if(head != NULL)
-    // {
-    //     //printf("Head: %p\n", head);
-    //     PUT(GET_PREVP(head), (uint)ptr);
-    // }
-    // PUT(GET_NEXTP(ptr), (uint)head);
-    // free_list[listIndex] = ptr;
 }
 
 static void remove_node_references(void *ptr)
 {
-    //printf("In remove_node_references\n");
-    // int listIndex = GET_SIZE(ptr);
     if(GET_PREV(ptr) != NULL)
     {
         PUT(GET_NEXTP(GET_PREV(ptr)), (uint)GET_NEXT(ptr)); //n.prev.next = n.next;
@@ -477,13 +466,10 @@ static void remove_node_references(void *ptr)
 
     PUT(GET_NEXTP(ptr), (uint)NULL); //replace next
     PUT(GET_PREVP(ptr), (uint)NULL); //replace prev
-    //printf("Leaving remove_node_references\n");
 }
 
 static void *extend_heap(size_t words)
 {
-    //printf("In extend_heap\n");
-
     char *bp;
     size_t size;
 
@@ -521,25 +507,6 @@ int get_list_index(uint size)
     return index;
 }
 
-void print_list(int listIndex, int initial)
-{
-    // if(initial) { //printf("Initial: "); }
-    // else {//printf("final: ");}
-
-    // int i = 0;
-
-    // void* head = free_list[listIndex];
-    // void *printPtr = head;
-    // //printf("%d: head -> ", listIndex);
-    // while(printPtr != NULL)
-    // {
-    //     if(i++ > 50) { //printf("Infinite head\n"); exit(-1); }
-    //     //printf("%p(%d) p: %p -> ", printPtr, GET_SIZE(printPtr), GET_PREV(printPtr));
-    //     printPtr = GET_NEXT(printPtr);
-    // }
-    //printf("null\n");
-}
-
 int mm_check(void)
 {
     void* ptr = heap_listp;
@@ -550,14 +517,14 @@ int mm_check(void)
         {
             if(!in_free_list(ptr)) 
             { 
-                //printf("%p not in free list but is unallocated\n", ptr);
+                printf("%p not in free list but is unallocated\n", ptr);
                 return 1; 
             }
             if(GET_PREV(ptr) != NULL)
             {
                 if(GET_NEXT(GET_PREV(ptr)) != ptr)
                 {
-                    //printf("The next's previous isn't this\n");
+                    printf("The next's previous isn't this\n");
                     return 1;
                 }
             }
@@ -565,7 +532,7 @@ int mm_check(void)
             {
                 if(GET_PREV(GET_NEXT(ptr)) != ptr)
                 {
-                    //printf("The prev's next isn't this\n");
+                    printf("The prev's next isn't this\n");
                     return 1;
                 }
             }
@@ -574,18 +541,12 @@ int mm_check(void)
         {
             if(in_free_list(ptr)) 
             { 
-                //printf("%p in free list but is allocated\n", ptr);
+                printf("%p in free list but is allocated\n", ptr);
                 return 1; 
             }
         }
 
         ptr = HDRP(NEXT_BLKP(ptr + WSIZE));
-    }
-
-    if(GET_SIZE(ptr) != 0) 
-    { 
-        //printf("broken?\n");
-        return 1; 
     }
 
     return 0;
