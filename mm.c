@@ -342,7 +342,11 @@ static void place(void *ptr, size_t asize)
     }
 }
 
-
+/*
+ * place - Takes a pointer pointing to the free block to be allocated and updates
+ *         its header, footer, and pointers in its free list. If the block is big
+ *         enough to be split, then we split it and re-place the new free block
+ */
 static void *coalesce(void *ptr)
 {
     void* nextH = HDRP(NEXT_BLKP(ptr + WSIZE));
