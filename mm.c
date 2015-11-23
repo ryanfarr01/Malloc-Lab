@@ -343,15 +343,19 @@ static void place(void *ptr, size_t asize)
 }
 
 /*
- * place - Takes a pointer pointing to the free block to be allocated and updates
- *         its header, footer, and pointers in its free list. If the block is big
- *         enough to be split, then we split it and re-place the new free block
+ * coalesce - Function takes a pointer and combines free blocks if it is surrounded in them. Falls into four cases:
+ *              1. Block on left and right are both allocated - no changes required
+ *              2. Block on right is free while right is allocated - combine right block with current and return the same pointer
+ *              3. Block on left is free while right is allocated - combine left block with current and return left block
+ *              4. Block is surround in free blocks - combine all three and return left block
  */
 static void *coalesce(void *ptr)
 {
+    //Get the headers of next and previous
     void* nextH = HDRP(NEXT_BLKP(ptr + WSIZE));
     void* prevH = HDRP(PREV_BLKP(ptr + WSIZE));
 
+    //Get teh sizes of all three
     size_t prev_alloc = GET_ALLOC(prevH);
     size_t next_alloc = GET_ALLOC(nextH);
     size_t size = GET_SIZE(ptr);
@@ -373,7 +377,6 @@ static void *coalesce(void *ptr)
 
         PUT(HDRP(PREV_BLKP(ptr + WSIZE)), PACK(size, 0));
         PUT(FTRP(ptr + WSIZE), PACK(size, 0));
-        
 
         ptr = HDRP(PREV_BLKP(ptr + WSIZE));
     }
@@ -409,6 +412,12 @@ void** is_head(void* ptr)
     return NULL;
 }
 
+/*
+ * find_and_place - Function that finds the list that the current ptr should be in and places it 
+ *                  based on an ascending order of memory addresses. If the head for that list is null,
+ *                  we simply place the head as the ptr. Otherwise it will be placed somewhere in the middle
+ *                  or at the end.
+ */
 void find_and_place(void * ptr)
 {
     int listIndex = get_list_index(GET_SIZE(ptr));
@@ -433,17 +442,23 @@ void find_and_place(void * ptr)
     void* next;
     while((next = GET_NEXT(current)) != NULL) //case: somewhere in the middle
     {
+        //Search until the next is greater than the current memory address, indicating it needs to be placed between the current and next
         if(next > ptr)
         {
+            //Set the current's next to this ptr
             PUT(GET_NEXTP(current), (uint)ptr);
+
+            //Set the next's prev to this ptr
             PUT(GET_PREVP(next), (uint)ptr);
 
+            //Update this ptr so that its next is next and prev is current. Placing this right between the two blocks
             PUT(GET_PREVP(ptr), (uint)current);
             PUT(GET_NEXTP(ptr), (uint)next);
 
             return;
         }
 
+        //Otherwise increment next
         current = GET_NEXT(current);
     }
 
@@ -500,30 +515,52 @@ static void *extend_heap(size_t words)
     return  ptr;
 }
 
+/*
+ * get_list_index - Determines the index in the free list of the size passed in.
+ *                  This is based on the leftmost bit. The index starts at 0 and becomes
+ *                  the number of bits before the leftmost 1 value. 
+ */
 int get_list_index(uint size)
 {
-    int index = 0;
+    int index = 0; //Start at 0
+
+    //Move the size bit vector to the right until it is only 1
     while((size = size >> 1) > 1)
     {
+        //increment the index
         index++;
     }
 
     return index;
 }
 
+/*
+ * mm_check - Function that goes through the entire heap, checks that every block that is free
+ *            is in a free list, every block that is allocated is not in a free list, and makes sure
+ *            that, if it is free, the next and prev pointers are correct by looking at the values 
+ *            of the prev and next and making sure they are pointing to the current ptr.
+ *
+ *            Note: this is only used for debugging. All occurances in the code that is run
+ *            should be commented out.
+ */
 int mm_check(void)
 {
     void* ptr = heap_listp;
 
+    //Go until we reach the epilogue header
     while(GET_SIZE(ptr) != 0)
     {
+        //IF the current block is unallocated
         if(GET_ALLOC(ptr) == 0) 
         {
+            //Make sure it's in the free list
             if(!in_free_list(ptr)) 
             { 
                 printf("%p not in free list but is unallocated\n", ptr);
                 return 1; 
             }
+
+            //Make sure that its prev is pointing to this ptr
             if(GET_PREV(ptr) != NULL)
             {
                 if(GET_NEXT(GET_PREV(ptr)) != ptr)
@@ -532,6 +569,8 @@ int mm_check(void)
                     return 1;
                 }
             }
+
+            //Make sure that its next is pointing to this ptr
             if(GET_NEXT(ptr) != NULL)
             {
                 if(GET_PREV(GET_NEXT(ptr)) != ptr)
@@ -541,8 +580,11 @@ int mm_check(void)
                 }
             }
         }
+
+        //Otherwise it's allocated
         else
         {
+            //Make sure it isn't in a free list
             if(in_free_list(ptr)) 
             { 
                 printf("%p in free list but is allocated\n", ptr);
@@ -550,6 +592,7 @@ int mm_check(void)
             }
         }
 
+        //Increment to the next block
         ptr = HDRP(NEXT_BLKP(ptr + WSIZE));
     }
 
